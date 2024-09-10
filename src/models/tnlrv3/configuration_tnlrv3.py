@@ -1,3 +1,18 @@
+"""
+这个程序定义了一个名为TuringNLRv3Config的配置类，用于存储和管理TuringNLRv3Model模型的配置。这个配置类包含了模型的各种参数，如词汇表大小、隐藏层的
+大小、Transformer编码器的层数、注意力头的数量、中间层的大小、激活函数类型、dropout概率、最大序列长度、类型词汇表大小、初始化范围和层归一化中的
+epsilon值等。
+
+主要功能如下：
+
+定义和初始化配置参数：类中的参数用于控制TuringNLRv3Model的结构和行为，比如隐藏层大小、注意力头数量等。当创建TuringNLRv3Config对象时，这些参数可以
+根据需要被传入或使用默认值。
+
+支持从配置文件加载参数：如果vocab_size参数是字符串（表示一个文件路径），程序会读取该文件并解析其中的配置参数，以设置TuringNLRv3Config对象的属性。
+
+管理模型配置：这个类继承自PretrainedConfig类，可以用于保存和加载预训练模型的配置。这种设计使得模型配置可以被保存到文件中，方便后续的使用和复现。
+"""
+
 # coding=utf-8
 """ TuringNLRv3 model configuration """
 
