@@ -1,3 +1,51 @@
+"""
+1. DatasetForMatching 类
+用途：用于加载和预处理数据文件中的数据，继承自IterableDataset。
+构造函数：
+file_path：数据文件路径。
+tokenizer：分词器对象或预训练模型的名称（默认为 "bert-base-uncased"）。
+根据tokenizer的类型（字符串或分词器对象）初始化相应的分词器。
+process 方法：将输入数据行进行分词处理。它将输入数据拆分为查询和邻居文本，以及关键词和邻居文本，并对每个文本段进行编码。
+__iter__ 方法：遍历数据文件中的每一行数据，并使用process方法处理后返回。
+
+2. DataCollatorForMatching 类
+用途：用于数据批次的收集和掩码语言模型（MLM）的预处理。
+构造函数参数：
+mlm：是否进行掩码语言模型训练。
+neighbor_num：邻居数量。
+token_length：每个序列的最大长度。
+tokenizer：分词器。
+mlm_probability：掩码语言模型的掩码概率。
+__call__ 方法：将输入样本处理成用于模型训练的批次数据，包含输入 ID、注意力掩码、MLM 标签等。并在需要时执行掩码语言模型的掩码处理。
+mask_tokens 方法：为掩码语言模型准备掩码输入/标签数据。
+create_training_sample 方法：从样本中生成训练数据，包括输入 IDs、注意力掩码和邻居的掩码。
+
+3. MultiProcessDataLoader 类
+用途：多进程数据加载器，用于分布式训练环境下的数据加载。
+关键属性和方法：
+dataset：数据集对象。
+batch_size：每个批次的样本数量。
+collate_fn：用于批处理数据的函数。
+local_rank 和 world_size：用于分布式训练的进程标识和总进程数。
+_start 方法：启动线程池并开始数据加载。
+_produce 方法：批量生成数据并存入队列。
+_generate_batch 方法：生成批次数据的迭代器。
+__next__ 方法：获取下一个批次数据。
+
+4. SingleProcessDataLoader 类
+用途：单进程数据加载器，用于非分布式环境的数据加载。
+关键属性和方法：
+dataset、batch_size、collate_fn 等同MultiProcessDataLoader类。
+_start 和 _produce 方法：用于启动单线程的数据生成。
+_generate_batch 方法：生成批次数据的迭代器。
+__next__ 方法：获取下一个批次数据。
+
+总结
+这个程序的核心目的是为大规模的深度学习任务（如分布式训练）提供高效的数据加载和预处理方案。DatasetForMatching类负责加载和处理原始数据，
+DataCollatorForMatching负责将数据整理成适合模型输入的格式，MultiProcessDataLoader和SingleProcessDataLoader则分别用于分布式和单机
+训练场景下的数据加载。
+"""
+
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from queue import Queue
