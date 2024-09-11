@@ -1,3 +1,40 @@
+"""
+这个程序定义了一些基于深度学习的类和方法，用于实现图神经网络的预训练模型和邻居预测任务。以下是对这个程序的中文解释。
+
+定义GraphTuringNLRPreTrainedModel类
+GraphTuringNLRPreTrainedModel类继承自TuringNLRv3PreTrainedModel，用于加载预训练的图神经网络模型。类中的from_pretrained方法主要用于从缓存或者本地文件中加载预训练模型的权重。
+
+方法解析：
+from_pretrained方法检查指定的路径是否存在预训练模型的权重文件，如果存在则加载这些权重并进行转换。
+如果模型的位置信息嵌入需要重新初始化，则会根据配置文件中指定的最大位置嵌入数调整嵌入矩阵的大小。
+如果权重文件中的相对位置偏置权重尺寸不符合要求，则会进行调整。
+定义GraphAggregation类
+GraphAggregation类继承自BertSelfAttention，实现了图注意力机制中的节点聚合操作。
+
+方法解析：
+forward方法接受输入的隐藏状态、注意力掩码以及相对位置偏置信息，计算新的节点表示（station_embed）。
+定义GraphBertEncoder类
+GraphBertEncoder类继承自nn.Module，用于实现图卷积编码器，它通过多个BertLayer层进行堆叠来编码输入的图结构数据。
+
+方法解析：
+forward方法接受输入的隐藏状态和注意力掩码，逐层更新隐藏状态，并可以选择输出所有隐藏状态和注意力权重。
+定义GraphFormers类
+GraphFormers类继承自TuringNLRv3PreTrainedModel，用于图神经网络的编码和位置偏置计算。
+
+方法解析：
+forward方法首先对输入进行嵌入，然后构建图节点之间的相对位置偏置和掩码信息，最后通过GraphBertEncoder类来获取最终编码结果。
+定义GraphFormersForNeighborPredict类
+GraphFormersForNeighborPredict类继承自GraphTuringNLRPreTrainedModel，主要用于图节点的邻居预测任务。
+
+方法解析：
+infer方法：从输入数据中推理得到节点的嵌入表示。
+test方法：在测试集上计算预测精度、AUC、MRR、NDCG等指标。
+forward方法：执行前向传播，并计算交叉熵损失，用于模型的训练。
+总结
+这个程序实现了一个图神经网络的框架，包含从预训练模型中加载权重、对输入图进行编码和聚合操作、以及在图邻居预测任务上的训练和评估过程。该框架使用了深度学习和注意力机制，适用于大规模图数据的表示学习和下游任务的预测。
+
+
+"""
 import os
 
 import numpy as np
