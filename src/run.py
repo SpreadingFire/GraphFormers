@@ -1,3 +1,50 @@
+"""
+1. 初始化与设置 (setup 和 cleanup 函数)
+setup(rank, args):
+
+初始化分布式环境，通过dist.init_process_group指定使用nccl后端（适合GPU），rank表示当前进程在分布式训练中的编号，world_size是总进程数。
+设置当前进程所使用的GPU设备。
+设置随机种子，确保结果可重复。
+cleanup():
+
+销毁分布式进程组，在所有训练或测试完成后调用，释放资源。
+
+2. 模型加载 (load_bert 函数)
+load_bert(args):
+从配置文件或预训练模型路径中加载模型配置。
+根据args.model_type的不同，加载不同的模型架构。
+GraphFormersForNeighborPredict: 图神经网络模型用于邻居预测。
+GraphSageMaxForNeighborPredict: 另一种图神经网络模型。
+返回加载好的模型对象。
+
+3. 训练函数 (train 函数)
+train(local_rank, args, end, load):
+初始化日志和分布式设置。
+加载模型，如果启用了fp16（半精度浮点数），会使用GradScaler进行梯度缩放以防止精度损失。
+如果需要，从指定的检查点（checkpoint）中加载模型权重。
+如果world_size > 1，使用DistributedDataParallel将模型并行化，否则使用单一进程模型。
+使用Adam优化器来更新模型的参数。
+准备数据加载器，依据是否为多进程设置选择MultiProcessDataLoader或SingleProcessDataLoader。
+在每个epoch的训练过程中：
+进行前向和反向传播。
+记录损失和优化器的状态。
+保存最佳模型并进行验证和测试。
+
+4. 测试函数 (test_single_process 和 test 函数)
+test_single_process(model, args, mode):
+
+测试模型在验证集或测试集上的表现。
+不计算梯度（@torch.no_grad()），防止在测试过程中修改模型参数。
+使用单进程数据加载器加载数据集，遍历每个batch，计算模型输出的评估指标。
+返回测试的主要指标结果。
+test(args):
+
+加载模型，并加载指定的检查点。
+调用test_single_process函数对模型进行测试。
+
+5. 其他功能
+使用日志记录模块logging来跟踪模型的训练和测试过程，包括训练损失、验证精度和保存的检查点等信息。
+"""
 import logging
 import os
 import random
