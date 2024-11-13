@@ -286,6 +286,11 @@ class GraphFormers(TuringNLRv3PreTrainedModel):  # 定义 GraphFormers 类，继
         # 获取嵌入输出和位置 ID
         embedding_output, position_ids = self.embeddings(input_ids=input_ids)
 
+        # 站点掩码 (station_mask)：仅在主节点位置启用站点信息，其它位置屏蔽站点信息。
+        # 节点掩码 (node_mask)：控制哪些邻居节点被视为有效，非邻居节点被屏蔽。
+        # 扩展注意力掩码 (extended_attention_mask)：对整个注意力掩码进行扩展和调整，屏蔽不需要关注的节点。
+        # 总结：这些掩码一起在注意力机制中起到了过滤和控制信息流的作用，确保模型只在合适的地方关注有效的信息。
+                    
         # 为站点添加注意力掩码
         station_mask = torch.zeros((all_nodes_num, 1), dtype=attention_mask.dtype, device=attention_mask.device)
         attention_mask = torch.cat([station_mask, attention_mask], dim=-1)  # 在原 attention_mask 前面添加一列站点掩码
