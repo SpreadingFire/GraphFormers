@@ -358,53 +358,53 @@ class GraphFormers(TuringNLRv3PreTrainedModel):  # 定义 GraphFormers 类，继
 
 
 
-class GraphFormersForNeighborPredict(GraphTuringNLRPreTrainedModel):
+class GraphFormersForNeighborPredict(GraphTuringNLRPreTrainedModel):  # 定义继承自GraphTuringNLRPreTrainedModel的GraphFormersForNeighborPredict类
     def __init__(self, config):
-        super().__init__(config)
-        self.bert = GraphFormers(config)
-        self.init_weights()
+        super().__init__(config)  # 调用父类构造函数初始化配置
+        self.bert = GraphFormers(config)  # 初始化GraphFormers模型
+        self.init_weights()  # 初始化权重
 
     def infer(self, input_ids_node_and_neighbors_batch, attention_mask_node_and_neighbors_batch,
               mask_node_and_neighbors_batch):
-        B, N, L = input_ids_node_and_neighbors_batch.shape
-        D = self.config.hidden_size
-        input_ids = input_ids_node_and_neighbors_batch.view(B * N, L)
-        attention_mask = attention_mask_node_and_neighbors_batch.view(B * N, L)
-        hidden_states = self.bert(input_ids, attention_mask, mask_node_and_neighbors_batch)
-        last_hidden_states = hidden_states[0]
-        cls_embeddings = last_hidden_states[:, 1].view(B, N, D)  # [B,N,D]
-        node_embeddings = cls_embeddings[:, 0, :]  # [B,D]
-        return node_embeddings
+        B, N, L = input_ids_node_and_neighbors_batch.shape  # 获取输入数据的批次大小B、邻居节点数量N和序列长度L
+        D = self.config.hidden_size  # 获取模型的隐藏层大小D
+        input_ids = input_ids_node_and_neighbors_batch.view(B * N, L)  # 将输入id展平成一个二维矩阵，形状为 (B * N, L)
+        attention_mask = attention_mask_node_and_neighbors_batch.view(B * N, L)  # 将注意力掩码展平成一个二维矩阵，形状为 (B * N, L)
+        hidden_states = self.bert(input_ids, attention_mask, mask_node_and_neighbors_batch)  # 通过GraphFormers模型计算隐层状态
+        last_hidden_states = hidden_states[0]  # 获取最后一层的隐藏状态
+        cls_embeddings = last_hidden_states[:, 1].view(B, N, D)  # 取每个节点的嵌入表示，形状为 [B, N, D]
+        node_embeddings = cls_embeddings[:, 0, :]  # 获取第一个节点的嵌入表示，形状为 [B, D]
+        return node_embeddings  # 返回节点的嵌入表示
 
     def test(self, input_ids_query_and_neighbors_batch, attention_mask_query_and_neighbors_batch,
              mask_query_and_neighbors_batch, \
              input_ids_key_and_neighbors_batch, attention_mask_key_and_neighbors_batch, mask_key_and_neighbors_batch,
              **kwargs):
         query_embeddings = self.infer(input_ids_query_and_neighbors_batch, attention_mask_query_and_neighbors_batch,
-                                      mask_query_and_neighbors_batch)
+                                      mask_query_and_neighbors_batch)  # 获取查询节点的嵌入表示
         key_embeddings = self.infer(input_ids_key_and_neighbors_batch, attention_mask_key_and_neighbors_batch,
-                                    mask_key_and_neighbors_batch)
-        scores = torch.matmul(query_embeddings, key_embeddings.transpose(0, 1))
-        labels = torch.arange(start=0, end=scores.shape[0], dtype=torch.long, device=scores.device)
+                                    mask_key_and_neighbors_batch)  # 获取键节点的嵌入表示
+        scores = torch.matmul(query_embeddings, key_embeddings.transpose(0, 1))  # 计算查询节点与键节点的相似度，使用矩阵乘法
+        labels = torch.arange(start=0, end=scores.shape[0], dtype=torch.long, device=scores.device)  # 生成标签，值为 [0, 1, ..., N-1]
 
-        predictions = torch.argmax(scores, dim=-1)
-        acc = (torch.sum((predictions == labels)) / labels.shape[0]).item()
+        predictions = torch.argmax(scores, dim=-1)  # 计算预测结果，取每一行的最大值的索引
+        acc = (torch.sum((predictions == labels)) / labels.shape[0]).item()  # 计算准确率
 
-        scores = scores.cpu().numpy()
-        labels = F.one_hot(labels).cpu().numpy()
-        auc_all = [roc_auc_score(labels[i], scores[i]) for i in range(labels.shape[0])]
-        auc = np.mean(auc_all)
-        mrr_all = [mrr_score(labels[i], scores[i]) for i in range(labels.shape[0])]
-        mrr = np.mean(mrr_all)
-        ndcg_all = [ndcg_score(labels[i], scores[i], labels.shape[1]) for i in range(labels.shape[0])]
-        ndcg = np.mean(ndcg_all)
+        scores = scores.cpu().numpy()  # 将得分转换为 NumPy 数组，方便后续计算
+        labels = F.one_hot(labels).cpu().numpy()  # 将标签转换为 one-hot 编码，并转到 CPU
+        auc_all = [roc_auc_score(labels[i], scores[i]) for i in range(labels.shape[0])]  # 计算每个样本的 AUC
+        auc = np.mean(auc_all)  # 计算所有样本的平均 AUC
+        mrr_all = [mrr_score(labels[i], scores[i]) for i in range(labels.shape[0])]  # 计算每个样本的 MRR
+        mrr = np.mean(mrr_all)  # 计算所有样本的平均 MRR
+        ndcg_all = [ndcg_score(labels[i], scores[i], labels.shape[1]) for i in range(labels.shape[0])]  # 计算每个样本的 NDCG
+        ndcg = np.mean(ndcg_all)  # 计算所有样本的平均 NDCG
 
         return {
-            "main": acc,
-            "acc": acc,
-            "auc": auc,
-            "mrr": mrr,
-            "ndcg": ndcg
+            "main": acc,  # 返回准确率
+            "acc": acc,  # 返回准确率
+            "auc": auc,  # 返回 AUC
+            "mrr": mrr,  # 返回 MRR
+            "ndcg": ndcg  # 返回 NDCG
         }
 
     def forward(self, input_ids_query_and_neighbors_batch, attention_mask_query_and_neighbors_batch,
@@ -412,10 +412,11 @@ class GraphFormersForNeighborPredict(GraphTuringNLRPreTrainedModel):
                 input_ids_key_and_neighbors_batch, attention_mask_key_and_neighbors_batch, mask_key_and_neighbors_batch,
                 **kwargs):
         query_embeddings = self.infer(input_ids_query_and_neighbors_batch, attention_mask_query_and_neighbors_batch,
-                                      mask_query_and_neighbors_batch)
+                                      mask_query_and_neighbors_batch)  # 获取查询节点的嵌入表示
         key_embeddings = self.infer(input_ids_key_and_neighbors_batch, attention_mask_key_and_neighbors_batch,
-                                    mask_key_and_neighbors_batch)
-        score = torch.matmul(query_embeddings, key_embeddings.transpose(0, 1))
-        labels = torch.arange(start=0, end=score.shape[0], dtype=torch.long, device=score.device)
-        loss = F.cross_entropy(score, labels)
-        return loss
+                                    mask_key_and_neighbors_batch)  # 获取键节点的嵌入表示
+        score = torch.matmul(query_embeddings, key_embeddings.transpose(0, 1))  # 计算查询节点与键节点的相似度
+        labels = torch.arange(start=0, end=score.shape[0], dtype=torch.long, device=score.device)  # 生成标签，值为 [0, 1, ..., N-1]
+        loss = F.cross_entropy(score, labels)  # 使用交叉熵损失函数计算损失
+        return loss  # 返回损失
+
