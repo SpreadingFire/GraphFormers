@@ -117,6 +117,11 @@ class GraphTuringNLRPreTrainedModel(TuringNLRv3PreTrainedModel):
         config = kwargs["config"]  # 获取配置对象
         state_dict = kwargs["state_dict"]  # 获取 `state_dict`
 
+
+
+        
+        # 确保模型的嵌入矩阵大小与配置一致，并支持增大或缩小位置嵌入矩阵。
+        
         # 初始化新的位置嵌入 (来自 Microsoft/UniLM)
         _k = 'bert.embeddings.position_embeddings.weight'
         if _k in state_dict:
