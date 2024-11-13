@@ -301,6 +301,12 @@ class GraphFormers(TuringNLRv3PreTrainedModel):  # 定义 GraphFormers 类，继
         extended_attention_mask = (1.0 - attention_mask[:, None, None, :]) * -10000.0
 
         # 如果使用相对位置偏置
+        # 这段代码的主要作用是处理相对位置偏置，并将其与嵌入输出进行结合。具体步骤包括：
+
+        # 计算相对位置矩阵，并根据配置添加站点的相对位置。
+        # 使用 One-hot 编码和线性变换调整相对位置。
+        # 在最终的嵌入输出中添加一个站点占位符。
+
         if self.config.rel_pos_bins > 0:
             # 计算相对位置矩阵
             rel_pos_mat = position_ids.unsqueeze(-2) - position_ids.unsqueeze(-1)
