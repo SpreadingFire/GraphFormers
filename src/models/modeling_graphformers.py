@@ -176,87 +176,86 @@ class GraphTuringNLRPreTrainedModel(TuringNLRv3PreTrainedModel):
 
         return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)  # 调用父类方法加载预训练模型
 
-class GraphAggregation(BertSelfAttention):
+class GraphAggregation(BertSelfAttention):  # 定义图聚合类，继承自 `BertSelfAttention`
     def __init__(self, config):
         super(GraphAggregation, self).__init__(config)
-        self.output_attentions = False
+        self.output_attentions = False  # 设置是否输出注意力权重
 
     def forward(self, hidden_states, attention_mask=None, rel_pos=None):
-        query = self.query(hidden_states[:, :1])  # B 1 D
-        key = self.key(hidden_states)
-        value = self.value(hidden_states)
+        query = self.query(hidden_states[:, :1])  # B 1 D，取第一个时间步的 hidden_states 作为查询向量
+        key = self.key(hidden_states)  # 计算 key 向量
+        value = self.value(hidden_states)  # 计算 value 向量
         station_embed = self.multi_head_attention(query=query,
                                                   key=key,
                                                   value=value,
                                                   attention_mask=attention_mask,
-                                                  rel_pos=rel_pos)[0]  # B 1 D
-        station_embed = station_embed.squeeze(1)
+                                                  rel_pos=rel_pos)[0]  # B 1 D，进行多头注意力计算并取输出
+        station_embed = station_embed.squeeze(1)  # 去掉维度为 1 的维度
 
-        return station_embed
+        return station_embed  # 返回 station_embed 作为输出
 
 
-class GraphBertEncoder(nn.Module):
+class GraphBertEncoder(nn.Module):  # 定义图 Bert 编码器类
     def __init__(self, config):
         super(GraphBertEncoder, self).__init__()
 
-        self.output_attentions = config.output_attentions
-        self.output_hidden_states = config.output_hidden_states
+        self.output_attentions = config.output_attentions  # 是否输出注意力权重
+        self.output_hidden_states = config.output_hidden_states  # 是否输出隐藏状态
+        # 初始化多个 BertLayer
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
 
-        self.graph_attention = GraphAggregation(config=config)
+        self.graph_attention = GraphAggregation(config=config)  # 初始化图聚合层
 
     def forward(self,
                 hidden_states,
                 attention_mask,
-                node_mask=None,
-                node_rel_pos=None,
-                rel_pos=None):
+                node_mask=None,  # 节点掩码
+                node_rel_pos=None,  # 节点相对位置
+                rel_pos=None):  # 相对位置
 
-        all_hidden_states = ()
-        all_attentions = ()
+        all_hidden_states = ()  # 保存所有隐藏状态
+        all_attentions = ()  # 保存所有注意力权重
 
-        all_nodes_num, seq_length, emb_dim = hidden_states.shape
-        batch_size, _, _, subgraph_node_num = node_mask.shape
+        all_nodes_num, seq_length, emb_dim = hidden_states.shape  # 获取输入形状
+        batch_size, _, _, subgraph_node_num = node_mask.shape  # 获取批次大小和子图节点数
 
         for i, layer_module in enumerate(self.layer):
             if self.output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                all_hidden_states = all_hidden_states + (hidden_states,)  # 保存当前层的隐藏状态
 
-            if i > 0:
-
+            if i > 0:  # 从第二层开始进行图聚合
                 hidden_states = hidden_states.view(batch_size, subgraph_node_num, seq_length, emb_dim)  # B SN L D
-                cls_emb = hidden_states[:, :, 1].clone()  # B SN D
+                cls_emb = hidden_states[:, :, 1].clone()  # 取出子图中的 CLS 向量 B SN D
                 station_emb = self.graph_attention(hidden_states=cls_emb, attention_mask=node_mask,
-                                                   rel_pos=node_rel_pos)  # B D
+                                                   rel_pos=node_rel_pos)  # 计算图聚合后的嵌入 B D
 
-                # update the station in the query/key
-                hidden_states[:, 0, 0] = station_emb
-                hidden_states = hidden_states.view(all_nodes_num, seq_length, emb_dim)
+                # 更新查询/键的 station 信息
+                hidden_states[:, 0, 0] = station_emb  # 将 station_emb 更新到第一个时间步
+                hidden_states = hidden_states.view(all_nodes_num, seq_length, emb_dim)  # 恢复原形状
 
-                layer_outputs = layer_module(hidden_states, attention_mask=attention_mask, rel_pos=rel_pos)
+                layer_outputs = layer_module(hidden_states, attention_mask=attention_mask, rel_pos=rel_pos)  # 通过 BertLayer
 
-            else:
-                temp_attention_mask = attention_mask.clone()
-                temp_attention_mask[::subgraph_node_num, :, :, 0] = -10000.0
-                layer_outputs = layer_module(hidden_states, attention_mask=temp_attention_mask, rel_pos=rel_pos)
+            else:  # 第一个层的处理
+                temp_attention_mask = attention_mask.clone()  # 克隆注意力掩码
+                temp_attention_mask[::subgraph_node_num, :, :, 0] = -10000.0  # 修改掩码中的特定位置，确保忽略某些节点
+                layer_outputs = layer_module(hidden_states, attention_mask=temp_attention_mask, rel_pos=rel_pos)  # 通过 BertLayer
 
-            hidden_states = layer_outputs[0]
+            hidden_states = layer_outputs[0]  # 获取输出的隐藏状态
 
             if self.output_attentions:
-                all_attentions = all_attentions + (layer_outputs[1],)
+                all_attentions = all_attentions + (layer_outputs[1],)  # 保存注意力权重
 
-        # Add last layer
+        # 添加最后一层的隐藏状态
         if self.output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        outputs = (hidden_states,)
+        outputs = (hidden_states,)  # 最终输出的隐藏状态
         if self.output_hidden_states:
-            outputs = outputs + (all_hidden_states,)
+            outputs = outputs + (all_hidden_states,)  # 如果需要，添加所有隐藏状态
         if self.output_attentions:
-            outputs = outputs + (all_attentions,)
+            outputs = outputs + (all_attentions,)  # 如果需要，添加所有注意力权重
 
-        return outputs  # last-layer hidden state, (all hidden states), (all attentions)
-
+        return outputs  # 返回最后一层的隐藏状态，以及（可选的）所有隐藏状态和注意力权重
 
 class GraphFormers(TuringNLRv3PreTrainedModel):
     def __init__(self, config):
