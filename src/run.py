@@ -93,40 +93,51 @@ def load_bert(args):
 
 def train(local_rank, args, end, load):
     try:
+        # 如果是主进程，则设置日志记录
         if local_rank == 0:
             from src.utils import setuplogging
-            setuplogging()
-        os.environ["RANK"] = str(local_rank)
-        setup(local_rank, args)
+            setuplogging()  # 设置日志记录
+
+        os.environ["RANK"] = str(local_rank)  # 设置当前进程的 rank（进程编号）
+        setup(local_rank, args)  # 初始化设置，可能包括分布式训练的配置
+
+        # 如果使用 FP16 精度训练，则导入相关模块并初始化 GradScaler
         if args.fp16:
             from torch.cuda.amp import autocast
-            scaler = torch.cuda.amp.GradScaler()
+            scaler = torch.cuda.amp.GradScaler()  # 用于管理 FP16 训练的精度
 
-        model = load_bert(args)
-        logging.info('loading model: {}'.format(args.model_type))
-        model = model.cuda()
+        model = load_bert(args)  # 加载模型（可能是BERT）
+        logging.info('loading model: {}'.format(args.model_type))  # 打印日志：加载模型类型
+        model = model.cuda()  # 将模型移到 GPU 上
 
+        # 如果加载模型的检查点，则恢复模型的状态
         if load:
-            model.load_state_dict(torch.load(args.load_ckpt_name, map_location="cpu"))
-            logging.info('load ckpt:{}'.format(args.load_ckpt_name))
+            model.load_state_dict(torch.load(args.load_ckpt_name, map_location="cpu"))  # 加载模型的权重
+            logging.info('load ckpt:{}'.format(args.load_ckpt_name))  # 打印日志：加载的检查点路径
 
+        # 如果是分布式训练，使用 DDP（分布式数据并行）封装模型
         if args.world_size > 1:
             ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
         else:
             ddp_model = model
 
+        # 初始化优化器
         optimizer = optim.Adam([{'params': ddp_model.parameters(), 'lr': args.lr}])
 
+        # 数据处理器（用于处理数据集的批次和对齐）
         data_collator = DataCollatorForMatching(mlm=args.mlm, neighbor_num=args.neighbor_num,
                                                 token_length=args.token_length, random_seed=args.random_seed)
-        loss = 0.0
-        global_step = 0
-        best_acc, best_count = 0.0, 0
+
+        loss = 0.0  # 初始化损失
+        global_step = 0  # 初始化训练步数
+        best_acc, best_count = 0.0, 0  # 初始化最好的准确率和计数器
+
+        # 训练循环
         for ep in range(args.epochs):
-            start_time = time.time()
-            ddp_model.train()
-            dataset = DatasetForMatching(file_path=args.train_data_path)
-            if args.world_size > 1:
+            start_time = time.time()  # 记录每个 epoch 的开始时间
+            ddp_model.train()  # 将模型设置为训练模式
+            dataset = DatasetForMatching(file_path=args.train_data_path)  # 加载训练数据集
+            if args.world_size > 1:  # 如果是多进程分布式训练
                 end.value = False
                 dataloader = MultiProcessDataLoader(dataset,
                                                     batch_size=args.train_batch_size,
@@ -137,65 +148,74 @@ def train(local_rank, args, end, load):
             else:
                 dataloader = SingleProcessDataLoader(dataset, batch_size=args.train_batch_size,
                                                      collate_fn=data_collator, blocking=True)
+            # 遍历数据加载器中的每个批次进行训练
             for step, batch in enumerate(dataloader):
+                # 将数据移到 GPU（如果启用了 GPU）
                 if args.enable_gpu:
                     for k, v in batch.items():
                         if v is not None:
                             batch[k] = v.cuda(non_blocking=True)
 
+                # 使用混合精度训练（FP16）时，进行自动类型转换
                 if args.fp16:
-                    with autocast():
+                    with autocast():  # 开启自动混合精度训练
                         batch_loss = ddp_model(**batch)
                 else:
                     batch_loss = ddp_model(**batch)
+                
+                # 累积损失并进行反向传播
                 loss += batch_loss.item()
                 optimizer.zero_grad()
                 if args.fp16:
-                    scaler.scale(batch_loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
+                    scaler.scale(batch_loss).backward()  # 使用缩放的反向传播
+                    scaler.step(optimizer)  # 更新优化器
+                    scaler.update()  # 更新 scaler
                 else:
-                    batch_loss.backward()
-                    optimizer.step()
+                    batch_loss.backward()  # 普通反向传播
+                    optimizer.step()  # 更新优化器
 
                 global_step += 1
 
+                # 每隔一定步数打印训练信息
                 if local_rank == 0 and global_step % args.log_steps == 0:
                     logging.info(
                         '[{}] cost_time:{} step:{}, lr:{}, train_loss: {:.5f}'.format(
                             local_rank, time.time() - start_time, global_step, optimizer.param_groups[0]['lr'],
                                         loss / args.log_steps))
-                    loss = 0.0
+                    loss = 0.0  # 重置损失
 
-                dist.barrier()
-            logging.info("train time:{}".format(time.time() - start_time))
+                dist.barrier()  # 确保所有进程同步
 
-            if local_rank == 0:
+            logging.info("train time:{}".format(time.time() - start_time))  # 打印训练时间
+
+            if local_rank == 0:  # 主进程进行保存和验证
+                # 保存当前 epoch 的模型
                 ckpt_path = os.path.join(args.model_dir, '{}-epoch-{}.pt'.format(args.savename, ep + 1))
                 torch.save(model.state_dict(), ckpt_path)
                 logging.info(f"Model saved to {ckpt_path}")
 
-                logging.info("Star validation for epoch-{}".format(ep + 1))
-                acc = test_single_process(model, args, "valid")
+                logging.info("Star validation for epoch-{}".format(ep + 1))  # 开始验证
+                acc = test_single_process(model, args, "valid")  # 进行验证
                 logging.info("validation time:{}".format(time.time() - start_time))
-                if acc > best_acc:
+                if acc > best_acc:  # 如果验证准确率更好，则保存最佳模型
                     ckpt_path = os.path.join(args.model_dir, '{}-best.pt'.format(args.savename))
                     torch.save(model.state_dict(), ckpt_path)
                     logging.info(f"Model saved to {ckpt_path}")
-                    best_acc = acc
-                    best_count = 0
+                    best_acc = acc  # 更新最佳准确率
+                    best_count = 0  # 重置计数器
                 else:
                     best_count += 1
-                    if best_count >= 2:
+                    if best_count >= 2:  # 如果验证连续两次没有提升，则停止训练并进行测试
                         start_time = time.time()
                         ckpt_path = os.path.join(args.model_dir, '{}-best.pt'.format(args.savename))
                         model.load_state_dict(torch.load(ckpt_path, map_location="cpu"))
                         logging.info("Star testing for best")
-                        acc = test_single_process(model, args, "test")
+                        acc = test_single_process(model, args, "test")  # 在测试集上进行测试
                         logging.info("test time:{}".format(time.time() - start_time))
-                        exit()
-            dist.barrier()
+                        exit()  # 退出训练
+            dist.barrier()  # 确保所有进程同步
 
+        # 训练结束后，加载最好的模型并进行最终测试
         if local_rank == 0:
             start_time = time.time()
             ckpt_path = os.path.join(args.model_dir, '{}-best.pt'.format(args.savename))
@@ -203,14 +223,16 @@ def train(local_rank, args, end, load):
             logging.info("Star testing for best")
             acc = test_single_process(model, args, "test")
             logging.info("test time:{}".format(time.time() - start_time))
-        dist.barrier()
-        cleanup()
+        dist.barrier()  # 确保所有进程同步
+        cleanup()  # 清理资源
+
     except:
+        # 如果出现异常，打印错误信息
         import sys
         import traceback
         error_type, error_value, error_trace = sys.exc_info()
         traceback.print_tb(error_trace)
-        logging.info(error_value)
+        logging.info(error_value)  # 记录错误信息
 
 
 @torch.no_grad()
