@@ -76,17 +76,18 @@ from src.models.tnlrv3.modeling import TuringNLRv3PreTrainedModel, logger, BertS
 from src.utils import roc_auc_score, mrr_score, ndcg_score
 
 
-class GraphTuringNLRPreTrainedModel(TuringNLRv3PreTrainedModel):
+class GraphTuringNLRPreTrainedModel(TuringNLRv3PreTrainedModel): 
     @classmethod
     def from_pretrained(
             cls, pretrained_model_name_or_path, reuse_position_embedding=None,
             replace_prefix=None, *model_args, **kwargs,
     ):
-        model_type = kwargs.pop('model_type', 'tnlrv3')
-        if model_type is not None and "state_dict" not in kwargs:
-            if model_type in cls.supported_convert_pretrained_model_archive_map:
+        model_type = kwargs.pop('model_type', 'tnlrv3')  # 获取模型类型，如果未提供，默认为 'tnlrv3'
+        
+        if model_type is not None and "state_dict" not in kwargs:  # 如果指定了模型类型并且未提供 `state_dict`
+            if model_type in cls.supported_convert_pretrained_model_archive_map:  # 检查该模型类型是否受支持
                 pretrained_model_archive_map = cls.supported_convert_pretrained_model_archive_map[model_type]
-                if pretrained_model_name_or_path in pretrained_model_archive_map:
+                if pretrained_model_name_or_path in pretrained_model_archive_map:  # 如果路径在预训练模型映射中
                     state_dict = get_checkpoint_from_transformer_cache(
                         archive_file=pretrained_model_archive_map[pretrained_model_name_or_path],
                         pretrained_model_name_or_path=pretrained_model_name_or_path,
@@ -94,81 +95,81 @@ class GraphTuringNLRPreTrainedModel(TuringNLRv3PreTrainedModel):
                         cache_dir=kwargs.get("cache_dir", None), force_download=kwargs.get("force_download", None),
                         proxies=kwargs.get("proxies", None), resume_download=kwargs.get("resume_download", None),
                     )
-                    state_dict = state_dict_convert[model_type](state_dict)
+                    state_dict = state_dict_convert[model_type](state_dict)  # 转换 `state_dict` 为适合的格式
                     kwargs["state_dict"] = state_dict
-                    logger.info("Load HF ckpts")
-                elif os.path.isfile(pretrained_model_name_or_path):
+                    logger.info("Load HF ckpts")  # 打印日志，表明从 Hugging Face 加载检查点
+                elif os.path.isfile(pretrained_model_name_or_path):  # 如果提供的路径是文件
                     state_dict = torch.load(pretrained_model_name_or_path, map_location='cpu')
                     kwargs["state_dict"] = state_dict_convert[model_type](state_dict)
-                    logger.info("Load local ckpts")
-                elif os.path.isdir(pretrained_model_name_or_path):
+                    logger.info("Load local ckpts")  # 打印日志，表明从本地文件加载检查点
+                elif os.path.isdir(pretrained_model_name_or_path):  # 如果提供的路径是目录
                     state_dict = torch.load(os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME),
                                             map_location='cpu')
                     kwargs["state_dict"] = state_dict_convert[model_type](state_dict)
-                    logger.info("Load local ckpts")
+                    logger.info("Load local ckpts")  # 打印日志，表明从本地目录加载检查点
                 else:
-                    raise RuntimeError("Not fined the pre-trained checkpoint !")
+                    raise RuntimeError("Not fined the pre-trained checkpoint !")  # 抛出异常，未找到预训练检查点
 
-        if kwargs["state_dict"] is None:
+        if kwargs["state_dict"] is None:  # 如果 `state_dict` 为空
             logger.info("TNLRv3 does't support the model !")
-            raise NotImplementedError()
+            raise NotImplementedError()  # 抛出未实现的错误
+        
+        config = kwargs["config"]  # 获取配置对象
+        state_dict = kwargs["state_dict"]  # 获取 `state_dict`
 
-        config = kwargs["config"]
-        state_dict = kwargs["state_dict"]
-        # initialize new position embeddings (From Microsoft/UniLM)
+        # 初始化新的位置嵌入 (来自 Microsoft/UniLM)
         _k = 'bert.embeddings.position_embeddings.weight'
         if _k in state_dict:
-            if config.max_position_embeddings > state_dict[_k].shape[0]:
-                logger.info("Resize > position embeddings !")
+            if config.max_position_embeddings > state_dict[_k].shape[0]:  # 如果配置中位置嵌入大小大于 `state_dict` 中的大小
+                logger.info("Resize > position embeddings !")  # 打印日志，表明需要扩展位置嵌入
                 old_vocab_size = state_dict[_k].shape[0]
                 new_postion_embedding = state_dict[_k].data.new_tensor(torch.ones(
                     size=(config.max_position_embeddings, state_dict[_k].shape[1])), dtype=torch.float)
                 new_postion_embedding = nn.Parameter(data=new_postion_embedding, requires_grad=True)
-                new_postion_embedding.data.normal_(mean=0.0, std=config.initializer_range)
+                new_postion_embedding.data.normal_(mean=0.0, std=config.initializer_range)  # 初始化新位置嵌入
                 max_range = config.max_position_embeddings if reuse_position_embedding else old_vocab_size
                 shift = 0
-                while shift < max_range:
+                while shift < max_range:  # 复制旧位置嵌入数据到新的位置嵌入
                     delta = min(old_vocab_size, max_range - shift)
                     new_postion_embedding.data[shift: shift + delta, :] = state_dict[_k][:delta, :]
-                    logger.info("  CP [%d ~ %d] into [%d ~ %d]  " % (0, delta, shift, shift + delta))
+                    logger.info("  CP [%d ~ %d] into [%d ~ %d]  " % (0, delta, shift, shift + delta))  # 记录复制范围
                     shift += delta
                 state_dict[_k] = new_postion_embedding.data
-                del new_postion_embedding
-            elif config.max_position_embeddings < state_dict[_k].shape[0]:
+                del new_postion_embedding  # 删除临时变量以释放内存
+            elif config.max_position_embeddings < state_dict[_k].shape[0]:  # 如果需要缩小位置嵌入
                 logger.info("Resize < position embeddings !")
                 old_vocab_size = state_dict[_k].shape[0]
                 new_postion_embedding = state_dict[_k].data.new_tensor(torch.ones(
                     size=(config.max_position_embeddings, state_dict[_k].shape[1])), dtype=torch.float)
                 new_postion_embedding = nn.Parameter(data=new_postion_embedding, requires_grad=True)
                 new_postion_embedding.data.normal_(mean=0.0, std=config.initializer_range)
-                new_postion_embedding.data.copy_(state_dict[_k][:config.max_position_embeddings, :])
+                new_postion_embedding.data.copy_(state_dict[_k][:config.max_position_embeddings, :])  # 复制前 `max_position_embeddings` 个值
                 state_dict[_k] = new_postion_embedding.data
-                del new_postion_embedding
+                del new_postion_embedding  # 释放内存
 
-        # initialize new rel_pos weight
+        # 初始化新的相对位置偏置权重
         _k = 'bert.rel_pos_bias.weight'
-        if _k in state_dict and state_dict[_k].shape[1] != (config.rel_pos_bins + 2):
+        if _k in state_dict and state_dict[_k].shape[1] != (config.rel_pos_bins + 2):  # 检查相对位置偏置是否需要调整
             logger.info(
                 f"rel_pos_bias.weight.shape[1]:{state_dict[_k].shape[1]} != config.bus_num+config.rel_pos_bins:{config.rel_pos_bins + 2}")
             old_rel_pos_bias = state_dict[_k]
             new_rel_pos_bias = torch.cat(
-                [old_rel_pos_bias, old_rel_pos_bias[:, -1:].expand(old_rel_pos_bias.size(0), 2)], -1)
+                [old_rel_pos_bias, old_rel_pos_bias[:, -1:].expand(old_rel_pos_bias.size(0), 2)], -1)  # 扩展最后一列偏置
             new_rel_pos_bias = nn.Parameter(data=new_rel_pos_bias, requires_grad=True)
             state_dict[_k] = new_rel_pos_bias.data
-            del new_rel_pos_bias
+            del new_rel_pos_bias  # 释放内存
 
-        if replace_prefix is not None:
+        if replace_prefix is not None:  # 如果提供了替换前缀
             new_state_dict = {}
             for key in state_dict:
-                if key.startswith(replace_prefix):
-                    new_state_dict[key[len(replace_prefix):]] = state_dict[key]
+                if key.startswith(replace_prefix):  # 如果键以指定前缀开头
+                    new_state_dict[key[len(replace_prefix):]] = state_dict[key]  # 去掉前缀
                 else:
                     new_state_dict[key] = state_dict[key]
             kwargs["state_dict"] = new_state_dict
-            del state_dict
+            del state_dict  # 释放原始 `state_dict`
 
-        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
-
+        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)  # 调用父类方法加载预训练模型
 
 class GraphAggregation(BertSelfAttention):
     def __init__(self, config):
