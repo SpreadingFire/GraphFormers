@@ -265,6 +265,10 @@ class GraphFormers(TuringNLRv3PreTrainedModel):  # 定义 GraphFormers 类，继
         self.encoder = GraphBertEncoder(config=config)  # 初始化图 BERT 编码器
 
         # 如果 rel_pos_bins 大于0，则初始化相对位置偏置
+        # (1) 当启用相对位置编码时，代码会初始化一个线性层，用于将相对位置编码转换为注意力偏置（即相对位置偏置矩阵）。
+        # (2) 当没有启用相对位置编码时，则不使用相对位置偏置。
+        # 这样做的目的是在模型使用相对位置编码时能够通过该偏置机制调整注意力的权重，
+        # 使模型在计算注意力时能够考虑节点之间的相对位置。
         if self.config.rel_pos_bins > 0:
             self.rel_pos_bias = nn.Linear(self.config.rel_pos_bins + 2,
                                           config.num_attention_heads,
