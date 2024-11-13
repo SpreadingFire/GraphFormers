@@ -257,13 +257,14 @@ class GraphBertEncoder(nn.Module):  # 定义图 Bert 编码器类
 
         return outputs  # 返回最后一层的隐藏状态，以及（可选的）所有隐藏状态和注意力权重
 
-class GraphFormers(TuringNLRv3PreTrainedModel):
+class GraphFormers(TuringNLRv3PreTrainedModel):  # 定义 GraphFormers 类，继承自 TuringNLRv3PreTrainedModel
     def __init__(self, config):
-        super(GraphFormers, self).__init__(config=config)
-        self.config = config
-        self.embeddings = BertEmbeddings(config=config)
-        self.encoder = GraphBertEncoder(config=config)
+        super(GraphFormers, self).__init__(config=config)  # 调用父类构造函数
+        self.config = config  # 配置对象
+        self.embeddings = BertEmbeddings(config=config)  # 初始化 BertEmbeddings
+        self.encoder = GraphBertEncoder(config=config)  # 初始化图 BERT 编码器
 
+        # 如果 rel_pos_bins 大于0，则初始化相对位置偏置
         if self.config.rel_pos_bins > 0:
             self.rel_pos_bias = nn.Linear(self.config.rel_pos_bins + 2,
                                           config.num_attention_heads,
@@ -274,58 +275,63 @@ class GraphFormers(TuringNLRv3PreTrainedModel):
     def forward(self,
                 input_ids,
                 attention_mask,
-                neighbor_mask=None):
-        all_nodes_num, seq_length = input_ids.shape
-        batch_size, subgraph_node_num = neighbor_mask.shape
+                neighbor_mask=None):  # 前向传播函数，接受输入的 ID、注意力掩码和邻居掩码
+        all_nodes_num, seq_length = input_ids.shape  # 获取输入的节点数和序列长度
+        batch_size, subgraph_node_num = neighbor_mask.shape  # 获取批次大小和子图节点数
 
+        # 获取嵌入输出和位置 ID
         embedding_output, position_ids = self.embeddings(input_ids=input_ids)
 
-        # Add station attention mask
+        # 为站点添加注意力掩码
         station_mask = torch.zeros((all_nodes_num, 1), dtype=attention_mask.dtype, device=attention_mask.device)
-        attention_mask = torch.cat([station_mask, attention_mask], dim=-1)  # N 1+L
-        attention_mask[::(subgraph_node_num), 0] = 1.0  # only use the station for main nodes
+        attention_mask = torch.cat([station_mask, attention_mask], dim=-1)  # 在原 attention_mask 前面添加一列站点掩码
+        attention_mask[::(subgraph_node_num), 0] = 1.0  # 仅在主节点处使用站点
 
+        # 创建节点掩码和扩展后的注意力掩码
         node_mask = (1.0 - neighbor_mask[:, None, None, :]) * -10000.0
         extended_attention_mask = (1.0 - attention_mask[:, None, None, :]) * -10000.0
 
+        # 如果使用相对位置偏置
         if self.config.rel_pos_bins > 0:
+            # 计算相对位置矩阵
             rel_pos_mat = position_ids.unsqueeze(-2) - position_ids.unsqueeze(-1)
             rel_pos = relative_position_bucket(rel_pos_mat, num_buckets=self.config.rel_pos_bins,
                                                max_distance=self.config.max_rel_pos)
 
-            # rel_pos: (N,L,L) -> (N,1+L,L)
+            # rel_pos: (N,L,L) -> (N,1+L,L)，在位置矩阵前添加一列零
             temp_pos = torch.zeros(all_nodes_num, 1, seq_length, dtype=rel_pos.dtype, device=rel_pos.device)
             rel_pos = torch.cat([temp_pos, rel_pos], dim=1)
-            # rel_pos: (N,1+L,L) -> (N,1+L,1+L)
+            # rel_pos: (N,1+L,L) -> (N,1+L,1+L)，在矩阵的最后添加站点的相对位置
             station_relpos = torch.full((all_nodes_num, seq_length + 1, 1), self.config.rel_pos_bins,
                                         dtype=rel_pos.dtype, device=rel_pos.device)
             rel_pos = torch.cat([station_relpos, rel_pos], dim=-1)
 
-            # node_rel_pos:(B:batch_size, Head_num, neighbor_num+1)
+            # node_rel_pos: (B: batch_size, Head_num, neighbor_num+1)
             node_pos = self.config.rel_pos_bins + 1
             node_rel_pos = torch.full((batch_size, subgraph_node_num), node_pos, dtype=rel_pos.dtype,
                                       device=rel_pos.device)
-            node_rel_pos[:, 0] = 0
+            node_rel_pos[:, 0] = 0  # 将第一个节点的相对位置设置为 0
             node_rel_pos = F.one_hot(node_rel_pos,
                                      num_classes=self.config.rel_pos_bins + 2).type_as(
-                embedding_output)
-            node_rel_pos = self.rel_pos_bias(node_rel_pos).permute(0, 2, 1)  # B head_num, neighbor_num
-            node_rel_pos = node_rel_pos.unsqueeze(2)  # B head_num 1 neighbor_num
+                embedding_output)  # 将节点相对位置转换为 one-hot 编码
+            node_rel_pos = self.rel_pos_bias(node_rel_pos).permute(0, 2, 1)  # 使用线性层调整节点相对位置
+            node_rel_pos = node_rel_pos.unsqueeze(2)  # 添加额外维度以便与其他矩阵进行广播
 
-            # rel_pos: (N,Head_num,1+L,1+L)
+            # rel_pos: (N, Head_num, 1+L, 1+L)
             rel_pos = F.one_hot(rel_pos, num_classes=self.config.rel_pos_bins + 2).type_as(
-                embedding_output)
-            rel_pos = self.rel_pos_bias(rel_pos).permute(0, 3, 1, 2)
+                embedding_output)  # 对相对位置进行 one-hot 编码
+            rel_pos = self.rel_pos_bias(rel_pos).permute(0, 3, 1, 2)  # 使用线性层调整相对位置矩阵
 
         else:
-            node_rel_pos = None
+            node_rel_pos = None  # 如果没有使用相对位置，设置为 None
             rel_pos = None
 
-        # Add station_placeholder
+        # 添加站点占位符
         station_placeholder = torch.zeros(all_nodes_num, 1, embedding_output.size(-1)).type(
             embedding_output.dtype).to(embedding_output.device)
-        embedding_output = torch.cat([station_placeholder, embedding_output], dim=1)  # N 1+L D
+        embedding_output = torch.cat([station_placeholder, embedding_output], dim=1)  # 在嵌入输出前添加站点占位符
 
+        # 通过图 BERT 编码器进行前向传播
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -333,7 +339,8 @@ class GraphFormers(TuringNLRv3PreTrainedModel):
             node_rel_pos=node_rel_pos,
             rel_pos=rel_pos)
 
-        return encoder_outputs
+        return encoder_outputs  # 返回编码器的输出
+
 
 
 class GraphFormersForNeighborPredict(GraphTuringNLRPreTrainedModel):
