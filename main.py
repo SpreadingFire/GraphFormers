@@ -43,19 +43,17 @@ if __name__ == "__main__":
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
 
     cont = False
-    if args.mode == 'train':
-        print('-----------train------------')
-        if args.world_size > 1:
-            mp.freeze_support()
-            mgr = mp.Manager()
-            end = mgr.Value('b', False)
-            mp.spawn(train,
-                     args=(args, end, cont),
-                     nprocs=args.world_size,
-                     join=True)
-        else:
-            end = None
-            train(0, args, end, cont)
+    if args.world_size > 1:  # 如果世界大小（即并行处理的进程数）大于1
+        mp.freeze_support()  # 用于在 Windows 上支持多处理的保护机制
+        mgr = mp.Manager()  # 创建一个多进程管理器对象，用于在进程之间共享数据
+        end = mgr.Value('b', False)  # 创建一个共享的布尔变量，初始值为 False，用于标识是否结束
+        mp.spawn(train,  # 使用 `mp.spawn` 创建多个并行进程来运行 `train` 函数
+                 args=(args, end, cont),  # 传递给 `train` 函数的参数，包括 `args`，`end`，和 `cont`
+                 nprocs=args.world_size,  # 启动 `args.world_size` 个进程
+                 join=True)  # 确保在所有进程完成后，才会继续后续代码
+    else:  # 如果 `world_size` 小于或等于1
+        end = None  # 设置 `end` 为 None，因为不需要在单进程情况下共享变量
+        train(0, args, end, cont)  # 在单个进程中调用 `train` 函数，并传入参数 `0` 表示进程编号
 
     if args.mode == 'test':
         args.load_ckpt_name = "/data/workspace/Share/junhan/TopoGram_ckpt/dblp/topogram-pretrain-finetune-dblp-best3.pt"
